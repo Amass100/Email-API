@@ -108,7 +108,19 @@ def get_emails(
     date_filter: Optional[date] = Query(None, alias="date"),
     start_date: Optional[date] = None,
     end_date: Optional[date] = None,
+
+    # New timestamp filters
+    start_datetime: Optional[datetime] = None,
+    end_datetime: Optional[datetime] = None,
+
+    # Existing filters
     category: Optional[str] = None,
+
+    # New filters
+    mailbox: Optional[str] = None,
+    sender: Optional[str] = None,
+    subject_contains: Optional[str] = None,
+
     limit: int = 100
 ):
     conn = get_connection()
@@ -132,26 +144,50 @@ def get_emails(
 
     params = []
 
-    # Single specific date
+    # Filter by specific date
     if date_filter:
         query += " AND CAST(ReceivedDateTime AS DATE) = ?"
         params.append(date_filter)
 
-    # Start date
+    # Filter by date range
     if start_date:
         query += " AND CAST(ReceivedDateTime AS DATE) >= ?"
         params.append(start_date)
 
-    # End date
     if end_date:
         query += " AND CAST(ReceivedDateTime AS DATE) <= ?"
         params.append(end_date)
+
+    # Filter by exact timestamp range
+    if start_datetime:
+        query += " AND ReceivedDateTime >= ?"
+        params.append(start_datetime)
+
+    if end_datetime:
+        query += " AND ReceivedDateTime <= ?"
+        params.append(end_datetime)
 
     # Category filter
     if category:
         query += " AND Category = ?"
         params.append(category)
 
+    # Mailbox filter (Inbox, Spam, etc.)
+    if mailbox:
+        query += " AND Mailbox = ?"
+        params.append(mailbox)
+
+    # Sender filter
+    if sender:
+        query += " AND Sender LIKE ?"
+        params.append(f"%{sender}%")
+
+    # Subject keyword search
+    if subject_contains:
+        query += " AND Subject LIKE ?"
+        params.append(f"%{subject_contains}%")
+
+    # Apply limit and sort
     query = query.replace("SELECT", f"SELECT TOP {limit}", 1)
     query += " ORDER BY ReceivedDateTime DESC"
 
@@ -160,12 +196,43 @@ def get_emails(
     columns = [column[0] for column in cursor.description]
     rows = cursor.fetchall()
 
-    results = [dict(zip(columns, row)) for row in rows]
+    results = []
+
+    for row in rows:
+        record = dict(zip(columns, row))
+
+        # Format ReceivedDateTime
+        if record.get("ReceivedDateTime"):
+            record["ReceivedDateTime"] = (
+                record["ReceivedDateTime"]
+                .strftime("%m-%d-%Y %I:%M:%S %p UTC")
+            )
+
+        # Format InsertedAt
+        if record.get("InsertedAt"):
+            record["InsertedAt"] = (
+                record["InsertedAt"]
+                .strftime("%m-%d-%Y %I:%M:%S %p UTC")
+            )
+
+        results.append(record)
 
     cursor.close()
     conn.close()
 
     return {
         "count": len(results),
+        "filters": {
+            "date": date_filter,
+            "start_date": start_date,
+            "end_date": end_date,
+            "start_datetime": start_datetime,
+            "end_datetime": end_datetime,
+            "category": category,
+            "mailbox": mailbox,
+            "sender": sender,
+            "subject_contains": subject_contains,
+            "limit": limit
+        },
         "emails": results
     }
