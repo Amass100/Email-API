@@ -109,19 +109,18 @@ def get_emails(
     start_date: Optional[date] = None,
     end_date: Optional[date] = None,
 
-    # New timestamp filters
+    # Timestamp filters
     start_datetime: Optional[datetime] = None,
     end_datetime: Optional[datetime] = None,
 
-    # Existing filters
+    # Other filters
     category: Optional[str] = None,
-
-    # New filters
     mailbox: Optional[str] = None,
     sender: Optional[str] = None,
     subject_contains: Optional[str] = None,
 
-    limit: int = 100
+    # Optional result limit
+    limit: Optional[int] = None
 ):
     conn = get_connection()
     cursor = conn.cursor()
@@ -144,7 +143,7 @@ def get_emails(
 
     params = []
 
-    # Filter by specific date
+    # Filter by exact date
     if date_filter:
         query += " AND CAST(ReceivedDateTime AS DATE) = ?"
         params.append(date_filter)
@@ -158,7 +157,7 @@ def get_emails(
         query += " AND CAST(ReceivedDateTime AS DATE) <= ?"
         params.append(end_date)
 
-    # Filter by exact timestamp range
+    # Filter by exact datetime range
     if start_datetime:
         query += " AND ReceivedDateTime >= ?"
         params.append(start_datetime)
@@ -167,48 +166,53 @@ def get_emails(
         query += " AND ReceivedDateTime <= ?"
         params.append(end_datetime)
 
-    # Category filter
+    # Filter by category
     if category:
         query += " AND Category = ?"
         params.append(category)
 
-    # Mailbox filter (Inbox, Spam, etc.)
+    # Filter by mailbox
     if mailbox:
         query += " AND Mailbox = ?"
         params.append(mailbox)
 
-    # Sender filter
+    # Filter by sender (partial match)
     if sender:
         query += " AND Sender LIKE ?"
         params.append(f"%{sender}%")
 
-    # Subject keyword search
+    # Filter by subject keyword
     if subject_contains:
         query += " AND Subject LIKE ?"
         params.append(f"%{subject_contains}%")
 
-    # Apply limit and sort
-    query = query.replace("SELECT", f"SELECT TOP {limit}", 1)
+    # Optional limit
+    if limit is not None:
+        if limit > 5000:
+            limit = 5000
+        query = query.replace("SELECT", f"SELECT TOP {limit}", 1)
+
+    # Sort newest first
     query += " ORDER BY ReceivedDateTime DESC"
 
+    # Execute query
     cursor.execute(query, params)
 
     columns = [column[0] for column in cursor.description]
     rows = cursor.fetchall()
 
+    # Convert rows to dictionaries and format dates
     results = []
 
     for row in rows:
         record = dict(zip(columns, row))
 
-        # Format ReceivedDateTime
         if record.get("ReceivedDateTime"):
             record["ReceivedDateTime"] = (
                 record["ReceivedDateTime"]
                 .strftime("%m-%d-%Y %I:%M:%S %p UTC")
             )
 
-        # Format InsertedAt
         if record.get("InsertedAt"):
             record["InsertedAt"] = (
                 record["InsertedAt"]
